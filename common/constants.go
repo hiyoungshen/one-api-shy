@@ -28,6 +28,9 @@ var UsingSQLite = false
 var SessionSecret = uuid.New().String()
 var SQLitePath = "one-api.db"
 
+// added by shy
+var LogPath = "./data/"
+
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex
 

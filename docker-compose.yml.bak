@@ -2,8 +2,7 @@ version: '3.4'
 
 services:
   one-api:
-    # image: justsong/one-api:latest
-    image: hiyoungshen/one-api:latest
+    image: justsong/one-api:latest
     container_name: one-api
     restart: always
     command: --log-dir /app/logs
@@ -12,11 +11,10 @@ services:
     volumes:
       - ./data:/data
       - ./logs:/app/logs
-      - ./messages:/app/messages
     environment:
-      # - SQL_DSN=root:123456@tcp(host.docker.internal:3306)/one-api  # 修改此行，或注释掉以使用 SQLite 作为数据库
+      - SQL_DSN=root:123456@tcp(host.docker.internal:3306)/one-api  # 修改此行，或注释掉以使用 SQLite 作为数据库
       - REDIS_CONN_STRING=redis://redis
-      - SESSION_SECRET=dsadasecdesefsafasdas  # 修改为随机字符串
+      - SESSION_SECRET=random_string  # 修改为随机字符串
       - TZ=Asia/Shanghai
 #      - NODE_TYPE=slave  # 多机部署时从节点取消注释该行
 #      - SYNC_FREQUENCY=60  # 需要定期从数据库加载数据时取消注释该行

@@ -111,6 +111,20 @@ type TextResponse struct {
 	Error   OpenAIError `json:"error"`
 }
 
+// added by shy
+type MessageStored struct {
+	Time	string  `json:"time"`
+	Choices []OpenAITextResponseChoice `json:"choices"`
+	Usage   `json:"usage"`
+	Error   OpenAIError `json:"error"`
+	Model   string      `json:"model"`
+	Messages	[]Message `json:"messages"`
+	Group	string	`json:"group"`
+	UserId  int  `json:"user_id"`
+	TokenID	int `json:"token_id"`
+	ChannelType int `json:"channel_type"`
+}
+
 type OpenAITextResponseChoice struct {
 	Index        int `json:"index"`
 	Message      `json:"message"`

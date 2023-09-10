@@ -12,7 +12,26 @@ import (
 	"one-api/model"
 	"strings"
 	"time"
+    "regexp" // added by shy
+	"os" // added by shy
 )
+
+// added by shy
+type ResponseData struct {
+	SourceCode       string `json:"source_code"`
+	ProblemInfo      ProblemInfoData `json:"problem_info"`
+	Status           string `json:"status"`
+	Username         string `json:"username"`
+	Language         string `json:"language"`
+}
+type ProblemInfoData struct {
+	ProblemDescription       string `json:"problem_description"`
+	InputDescription         string `json:"input_description"`
+	OutputDescription        string `json:"output_description"`
+	SampleInputDescription   string `json:"sample_input_description"`
+	SampleOutputDescription  string `json:"sample_output_description"`
+}
+
 
 const (
 	APITypeOpenAI = iota
@@ -35,12 +54,25 @@ func init() {
 	}
 }
 
+// added by shy
+func modifyRequestBody(c *gin.Context, textRequest GeneralOpenAIRequest) {
+	newRequestBody, _ := json.Marshal(textRequest)
+	newRequest, _ := http.NewRequest(c.Request.Method, c.Request.URL.String(), bytes.NewBuffer(newRequestBody))
+	for key, values := range c.Request.Header {
+		for _, value := range values {
+			newRequest.Header.Add(key, value)
+		}
+	}
+	c.Request = newRequest
+}
+
 func relayTextHelper(c *gin.Context, relayMode int) *OpenAIErrorWithStatusCode {
 	channelType := c.GetInt("channel")
 	tokenId := c.GetInt("token_id")
 	userId := c.GetInt("id")
 	consumeQuota := c.GetBool("consume_quota")
 	group := c.GetString("group")
+	
 	var textRequest GeneralOpenAIRequest
 	if consumeQuota || channelType == common.ChannelTypeAzure || channelType == common.ChannelTypePaLM {
 		err := common.UnmarshalBodyReusable(c, &textRequest)
@@ -77,6 +109,44 @@ func relayTextHelper(c *gin.Context, relayMode int) *OpenAIErrorWithStatusCode {
 			return errorWrapper(errors.New("field instruction is required"), "required_field_missing", http.StatusBadRequest)
 		}
 	}
+	
+	// added by shy
+	for key := range textRequest.Messages {
+		if textRequest.Messages[key].Role == "user" {
+			// 正则表达式匹配“匹配形如http://wjpython.openjudge.cn/xxxx到结尾”的字符串
+			pattern := `http://wjpython.openjudge.cn/.*$`
+			input := textRequest.Messages[key].Content
+			regex, _ := regexp.Compile(pattern)
+			match := regex.FindString(input)
+			if match != "" {
+				resp, err := http.Post("http://localhost:3002/", "application/json", bytes.NewBuffer([]byte(`{"url": "` + match + `"}`)))
+
+				if err != nil {
+					return errorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+				} else {
+					var resp_dict ResponseData
+					err := json.NewDecoder(resp.Body).Decode(&resp_dict)
+					if err != nil {
+						return errorWrapper(err, "decode_response_failed", http.StatusInternalServerError)
+					}
+					source_code := resp_dict.SourceCode
+					problem_description := resp_dict.ProblemInfo.ProblemDescription
+					input_description := resp_dict.ProblemInfo.InputDescription
+					output_description := resp_dict.ProblemInfo.OutputDescription
+					sample_input_description := resp_dict.ProblemInfo.SampleInputDescription
+					sample_output_description := resp_dict.ProblemInfo.SampleOutputDescription
+					status := resp_dict.Status
+					// username := resp_dict.Username
+					// language := resp_dict.Language
+					// User的消息改为预先定义的Prompt格式
+					textRequest.Messages[key].Content = "我希望你假定自己是一个擅长在线编程解题的人，你将解释OpenJudge提交的错误原因。用户会给你一个OpenJudge的提交记录，包括题目描述、样例的描述、用户的代码和用户代码的提交状态（提交状态可能是Accepted、Runtime Error等等），你需要解释这个提交为什么会出错。你需要解释的内容包括：\n1. 代码的错误原因\n2. 代码的改进方案\n3. 代码的改进后的样子，并为每一行添加注释\n\n请在回答中写出以上三点，不要写解释。" + "\n\n题目描述：" + problem_description + "\n输入描述：" + input_description + "\n输出描述：" + output_description + "\n样例输入：" + sample_input_description + "\n样例输出：" + sample_output_description + "\n用户提交的源代码：" + source_code + "\n提交状态：" + status + "\n\n 你的回答：\n"
+				}
+			} else {
+			}
+		}
+	}
+	modifyRequestBody(c, textRequest)
+
 	// map model name
 	modelMapping := c.GetString("model_mapping")
 	isModelMapped := false
@@ -402,6 +472,50 @@ func relayTextHelper(c *gin.Context, relayMode int) *OpenAIErrorWithStatusCode {
 			}
 			textResponse.Usage.PromptTokens = promptTokens
 			textResponse.Usage.CompletionTokens = countTokenText(responseText, textRequest.Model)
+
+			// added by shy
+			textResponse.Usage.TotalTokens = textResponse.Usage.PromptTokens + textResponse.Usage.CompletionTokens
+
+			// added by shy
+			// 遍历textRequest.Messages，存下用户的消息为json格式
+			var messageStored MessageStored
+			messageStored.Model = textRequest.Model
+			messageStored.Messages = textRequest.Messages
+			responseMessage := Message{
+				Role: "assistant",
+				Content: responseText,
+			}
+			messageStored.Time = time.Now().Format("2006-01-02 15:04:05")
+			messageStored.Messages = append(messageStored.Messages, responseMessage)
+			messageStored.Group = c.GetString("group")
+			messageStored.UserId = c.GetInt("id")
+			messageStored.TokenID = c.GetInt("token_id")
+			messageStored.ChannelType = c.GetInt("channel")
+			messageStored.Choices = textResponse.Choices
+			messageStored.Usage = textResponse.Usage
+			messageStored.Error = textResponse.Error
+			// 保存到文件
+			fileName := fmt.Sprintf("./messages/%d.json", messageStored.UserId)
+			jsonStrStored, errRequest := json.Marshal(messageStored)
+			jsonStrStored = append(jsonStrStored, []byte("\n")...)
+			if errRequest != nil {
+				return errorWrapper(errRequest, "marshal_text_request_failed", http.StatusInternalServerError)
+			} else {
+				f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					return errorWrapper(err, "open_file_failed", http.StatusInternalServerError)
+				}
+				// 在文件末尾增加一行json
+				if _, err := f.Write(jsonStrStored); err != nil {
+					return errorWrapper(err, "write_file_failed", http.StatusInternalServerError)
+				}
+				if err := f.Close(); err != nil {
+					return errorWrapper(err, "close_file_failed", http.StatusInternalServerError)
+				}
+				// 打印日志
+				fmt.Sprintf("用户%d的消息已保存到文件%s", messageStored.UserId, fileName)
+			}
+
 			return nil
 		} else {
 			err, usage := openaiHandler(c, resp, consumeQuota, promptTokens, textRequest.Model)
