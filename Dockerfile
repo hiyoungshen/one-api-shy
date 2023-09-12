@@ -1,7 +1,7 @@
 FROM node:16 as builder
 
-# ENV http_proxy=http://localhost:7890
-# ENV https_proxy=http://localhost:7890
+ENV http_proxy=http://localhost:7890
+ENV https_proxy=http://localhost:7890
 
 WORKDIR /build
 COPY web/package.json .
