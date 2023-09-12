@@ -14,6 +14,7 @@ import (
 	"time"
     "regexp" // added by shy
 	"os" // added by shy
+	"path/filepath" // added by shy
 )
 
 // added by shy
@@ -119,7 +120,9 @@ func relayTextHelper(c *gin.Context, relayMode int) *OpenAIErrorWithStatusCode {
 			regex, _ := regexp.Compile(pattern)
 			match := regex.FindString(input)
 			if match != "" {
-				resp, err := http.Post("http://localhost:3002/", "application/json", bytes.NewBuffer([]byte(`{"url": "` + match + `"}`)))
+				// 获取环境变量
+				get_info_from_openjudge := os.Getenv("GET_INFO_FROM_OPENJUDGE")
+				resp, err := http.Post(get_info_from_openjudge, "application/json", bytes.NewBuffer([]byte(`{"url": "` + match + `"}`)))
 
 				if err != nil {
 					return errorWrapper(err, "do_request_failed", http.StatusInternalServerError)
@@ -494,27 +497,34 @@ func relayTextHelper(c *gin.Context, relayMode int) *OpenAIErrorWithStatusCode {
 			messageStored.Choices = textResponse.Choices
 			messageStored.Usage = textResponse.Usage
 			messageStored.Error = textResponse.Error
-			// 保存到文件
-			fileName := fmt.Sprintf("./messages/%d.json", messageStored.UserId)
-			jsonStrStored, errRequest := json.Marshal(messageStored)
-			jsonStrStored = append(jsonStrStored, []byte("\n")...)
-			if errRequest != nil {
-				return errorWrapper(errRequest, "marshal_text_request_failed", http.StatusInternalServerError)
-			} else {
-				f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-				if err != nil {
-					return errorWrapper(err, "open_file_failed", http.StatusInternalServerError)
+
+			if *(common.LogDir) != "" {
+				fileName := filepath.Join(*(common.LogDir), fmt.Sprintf("%d.json", messageStored.UserId))
+				// 保存到文件
+				jsonStrStored, errRequest := json.Marshal(messageStored)
+				jsonStrStored = append(jsonStrStored, []byte("\n")...)
+				if errRequest != nil {
+					return errorWrapper(errRequest, "marshal_text_request_failed", http.StatusInternalServerError)
+				} else {
+					f, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						return errorWrapper(err, "open_file_failed", http.StatusInternalServerError)
+					}
+					// 在文件末尾增加一行json
+					if _, err := f.Write(jsonStrStored); err != nil {
+						return errorWrapper(err, "write_file_failed", http.StatusInternalServerError)
+					}
+					if err := f.Close(); err != nil {
+						return errorWrapper(err, "close_file_failed", http.StatusInternalServerError)
+					}
+					// 打印日志
+					fmt.Sprintf("用户%d的消息已保存到文件%s", messageStored.UserId, fileName)
 				}
-				// 在文件末尾增加一行json
-				if _, err := f.Write(jsonStrStored); err != nil {
-					return errorWrapper(err, "write_file_failed", http.StatusInternalServerError)
-				}
-				if err := f.Close(); err != nil {
-					return errorWrapper(err, "close_file_failed", http.StatusInternalServerError)
-				}
-				// 打印日志
-				fmt.Sprintf("用户%d的消息已保存到文件%s", messageStored.UserId, fileName)
+
 			}
+
+			
+			
 
 			return nil
 		} else {

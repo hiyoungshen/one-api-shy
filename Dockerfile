@@ -1,8 +1,5 @@
 FROM node:16 as builder
 
-ENV http_proxy=http://localhost:7890
-ENV https_proxy=http://localhost:7890
-
 WORKDIR /build
 COPY web/package.json .
 RUN npm install
@@ -15,6 +12,8 @@ FROM golang AS builder2
 ENV GO111MODULE=on \
     CGO_ENABLED=1 \
     GOOS=linux
+
+ENV GOPROXY=https://goproxy.io
 
 WORKDIR /build
 ADD go.mod go.sum ./
